@@ -13,7 +13,7 @@
 *.dylib
 
 # Executables
-fse
+
 *.exe
 *.out
 *.app

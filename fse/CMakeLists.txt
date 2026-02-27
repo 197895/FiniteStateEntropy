@@ -1,0 +1,54 @@
+cmake_minimum_required(VERSION 3.16)
+
+project(minimal_fse C)
+
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
+add_library(fse_core STATIC
+    src/debug.c
+    src/entropy_common.c
+    src/fse_compress.c
+    src/fse_decompress.c
+    src/huf_compress.c
+    src/huf_decompress.c
+    src/huf_frame.c
+    src/hist.c
+)
+
+target_include_directories(fse_core
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(fse_core PRIVATE
+        -O3
+        -Wall
+        -Wextra
+        -Wcast-qual
+        -Wcast-align
+        -Wshadow
+        -Wstrict-aliasing=1
+        -Wswitch-enum
+        -Wstrict-prototypes
+        -Wundef
+    )
+endif()
+
+add_executable(fse_bench
+    bench/fse_bench.c
+)
+
+target_link_libraries(fse_bench PRIVATE fse_core)
+
+target_include_directories(fse_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_executable(fse_codec_bench
+    bench/fse_codec_bench.c
+)
+
+target_link_libraries(fse_codec_bench PRIVATE fse_core)
+
+target_include_directories(fse_codec_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
