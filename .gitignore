@@ -23,6 +23,7 @@
 *.user
 
 # Build results
+build
 [Dd]ebug/
 [Rr]elease/
 [Rr]eleases/
