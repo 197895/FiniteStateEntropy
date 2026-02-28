@@ -17,6 +17,8 @@ add_library(fse_core STATIC
     src/hist.c
 )
 
+set_property(TARGET fse_core PROPERTY POSITION_INDEPENDENT_CODE ON)
+
 target_include_directories(fse_core
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include

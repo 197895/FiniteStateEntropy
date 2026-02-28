@@ -3,19 +3,12 @@ cmake_minimum_required(VERSION 3.16)
 project(H5Z_FSE C)
 
 find_package(HDF5 COMPONENTS C REQUIRED)
+
+# If HDF5 is parallel, resolve MPI via CMake instead of hard-coded OpenMPI paths.
 if(HDF5_IS_PARALLEL)
-    find_path(H5Z_FSE_MPI_INCLUDE_DIR mpi.h
-        PATHS
-            /usr/lib/x86_64-linux-gnu/openmpi/include
-            /usr/include/openmpi
-    )
-    find_library(H5Z_FSE_MPI_LIB mpi
-        PATHS
-            /usr/lib/x86_64-linux-gnu/openmpi/lib
-            /usr/lib/x86_64-linux-gnu
-    )
-    if(NOT H5Z_FSE_MPI_INCLUDE_DIR OR NOT H5Z_FSE_MPI_LIB)
-        message(FATAL_ERROR "Parallel HDF5 detected, but mpi.h/libmpi were not found.")
+    find_package(MPI REQUIRED COMPONENTS C)
+    if(NOT MPI_C_FOUND)
+        message(FATAL_ERROR "Parallel HDF5 detected, but MPI C was not found.")
     endif()
 endif()
 
@@ -32,14 +25,20 @@ target_include_directories(H5Zfse PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/fse/include
     ${HDF5_INCLUDE_DIRS}
-    $<$<BOOL:${HDF5_IS_PARALLEL}>:${H5Z_FSE_MPI_INCLUDE_DIR}>
 )
+
+if(HDF5_IS_PARALLEL)
+    target_include_directories(H5Zfse PRIVATE ${MPI_C_INCLUDE_DIRS})
+endif()
 
 target_link_libraries(H5Zfse PRIVATE
     fse_core
     ${HDF5_LIBRARIES}
-    $<$<BOOL:${HDF5_IS_PARALLEL}>:${H5Z_FSE_MPI_LIB}>
 )
+
+if(HDF5_IS_PARALLEL)
+    target_link_libraries(H5Zfse PRIVATE MPI::MPI_C)
+endif()
 
 set_target_properties(H5Zfse PROPERTIES
     OUTPUT_NAME H5Zfse
