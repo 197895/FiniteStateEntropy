@@ -9,6 +9,8 @@ WORKDIR="${WORKDIR:-/workspace/FiniteStateEntropy/build}"
 BENCH_BIN="${BENCH_BIN:-./fse/fse_codec_bench}"
 ALGO="${ALGO:-fse_ans}"               # fse_ans | fse_huffman | all
 CHUNKS_MB="${CHUNKS_MB:-0}"
+BENCH_WARMUP="${BENCH_WARMUP:-1}"
+BENCH_ITERS="${BENCH_ITERS:-10}"
 
 CSV_FILE="${CSV_FILE:-${SCRIPT_DIR}/${ALGO}_results.csv}"
 LOG_DIR="${LOG_DIR:-${SCRIPT_DIR}/log}"
@@ -75,6 +77,8 @@ printf 'dataset_folder,dataset_name,file_size_bytes,algo,input_type,ratio,comp_m
 echo "[info] bench: ${bench_path}" | tee -a "${LOG_FILE}"
 echo "[info] csv: ${CSV_FILE}" | tee -a "${LOG_FILE}"
 echo "[info] datasets: ${#dataset_files[@]}" | tee -a "${LOG_FILE}"
+echo "[info] warmup: ${BENCH_WARMUP}" | tee -a "${LOG_FILE}"
+echo "[info] iters: ${BENCH_ITERS}" | tee -a "${LOG_FILE}"
 
 for i in "${!dataset_files[@]}"; do
     dataset_file="${dataset_files[$i]}"
@@ -88,7 +92,7 @@ for i in "${!dataset_files[@]}"; do
         tmp_log="$(mktemp /tmp/fse_codec_bench.XXXXXX.log)"
 
         echo "[run] ${algo_name} (${input_type}) ${dataset_file}" | tee -a "${LOG_FILE}"
-        if "${bench_path}" "${input_type}" "${dataset_file}" --algo "${algo_name}" --chunks "${CHUNKS_MB}" --csv "${tmp_csv}" > "${tmp_log}" 2>&1; then
+        if "${bench_path}" "${input_type}" "${dataset_file}" --algo "${algo_name}" --chunks "${CHUNKS_MB}" --warmup "${BENCH_WARMUP}" --iters "${BENCH_ITERS}" --csv "${tmp_csv}" > "${tmp_log}" 2>&1; then
             cat "${tmp_log}" >> "${LOG_FILE}"
             wrote_rows=0
             while IFS=, read -r chunk_label chunk_bytes ratio_pct comp_mbps decomp_mbps; do
@@ -139,4 +143,3 @@ for i in "${!dataset_files[@]}"; do
 done
 
 echo "[done] csv=${CSV_FILE}" | tee -a "${LOG_FILE}"
-

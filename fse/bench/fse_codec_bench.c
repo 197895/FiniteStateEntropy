@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <errno.h>
 
 #include "fse.h"
 #include "huf.h"
@@ -169,6 +170,18 @@ static int parse_chunks(const char* arg, double** chunks_mb, size_t* count) {
     return 1;
 }
 
+static int parse_size_t_arg(const char* arg, size_t* value) {
+    unsigned long long parsed;
+    char* end = NULL;
+    errno = 0;
+    parsed = strtoull(arg, &end, 10);
+    if (errno != 0 || end == arg || *end != '\0') {
+        return 0;
+    }
+    *value = (size_t)parsed;
+    return ((unsigned long long)(*value) == parsed);
+}
+
 static chunk_t* build_chunks(size_t total_size, size_t chunk_size, size_t* out_count) {
     size_t cap = 16;
     size_t n = 0;
@@ -273,6 +286,8 @@ int main(int argc, char** argv) {
     const char* input_path = NULL;
     const char* chunks_arg = "0";
     const char* csv_path = NULL;
+    size_t warmup_iters = 1;
+    size_t measure_iters = 10;
     bench_algo_t algo = BENCH_ALGO_FSE_ANS;
     uint8_t* input = NULL;
     size_t input_size = 0;
@@ -283,7 +298,7 @@ int main(int argc, char** argv) {
 
     if (argc < 3) {
         fprintf(stderr,
-                "Usage: %s <-u2|-u4> <input.bin> [--algo fse_ans|fse_huffman] [--chunks 0,0.125,0.5] [--csv out.csv]\n",
+                "Usage: %s <-u2|-u4> <input.bin> [--algo fse_ans|fse_huffman] [--chunks 0,0.125,0.5] [--warmup N] [--iters N] [--csv out.csv]\n",
                 argv[0]);
         return 1;
     }
@@ -304,6 +319,16 @@ int main(int argc, char** argv) {
             }
         } else if (!strcmp(argv[ci], "--chunks") && ci + 1 < (size_t)argc) {
             chunks_arg = argv[++ci];
+        } else if (!strcmp(argv[ci], "--warmup") && ci + 1 < (size_t)argc) {
+            if (!parse_size_t_arg(argv[++ci], &warmup_iters)) {
+                fprintf(stderr, "Invalid --warmup: %s\n", argv[ci]);
+                return 1;
+            }
+        } else if (!strcmp(argv[ci], "--iters") && ci + 1 < (size_t)argc) {
+            if (!parse_size_t_arg(argv[++ci], &measure_iters) || measure_iters == 0) {
+                fprintf(stderr, "Invalid --iters: %s (must be >= 1)\n", argv[ci]);
+                return 1;
+            }
         } else if (!strcmp(argv[ci], "--csv") && ci + 1 < (size_t)argc) {
             csv_path = argv[++ci];
         } else {
@@ -354,6 +379,8 @@ int main(int argc, char** argv) {
     printf("  Input file: %s\n", input_path);
     printf("  Algo: %s\n", (algo == BENCH_ALGO_FSE_ANS) ? "fse_ans" : "fse_huffman");
     printf("  Chunks (MB): %s\n", chunks_arg);
+    printf("  Warmup iters: %zu\n", warmup_iters);
+    printf("  Measured iters: %zu\n", measure_iters);
     if (csv_path) {
         printf("  CSV: %s\n", csv_path);
     }
@@ -371,14 +398,11 @@ int main(int argc, char** argv) {
         size_t max_chunk_cap = 0;
         uint8_t* cbuf;
         uint8_t* dbuf;
-        const int kIters = 11;
-        int iter;
-        double total_comp_ms = 0.0;
-        double total_decomp_ms = 0.0;
-        double total_comp_bytes = 0.0;
-        double avg_comp_ms;
-        double avg_decomp_ms;
-        double avg_comp_bytes;
+        size_t iter;
+        const size_t total_iters = warmup_iters + measure_iters;
+        double best_ratio_pct = 0.0;
+        double max_comp_mbps = 0.0;
+        double max_decomp_mbps = 0.0;
         double ratio_pct;
         double comp_mbps;
         double decomp_mbps;
@@ -394,7 +418,7 @@ int main(int argc, char** argv) {
         chunks = build_chunks(input_size, chunk_bytes, &chunk_count);
         if (!chunks) {
             fprintf(stderr, "Out of memory while building chunks.\n");
-            fclose(csv);
+            if (csv) fclose(csv);
             free(chunks_mb);
             free(input);
             return 1;
@@ -427,7 +451,10 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        for (iter = 0; iter < kIters; ++iter) {
+        for (iter = 0; iter < total_iters; ++iter) {
+            double run_ratio_pct;
+            double run_comp_mbps;
+            double run_decomp_mbps;
             run_stats_t st = run_once(algo, input, chunks, chunk_count, cbuf, max_chunk_cap, dbuf, max_chunk_len);
             if (!st.ok) {
                 fprintf(stderr, "%s\n", st.error);
@@ -439,19 +466,26 @@ int main(int argc, char** argv) {
                 free(input);
                 return 1;
             }
-            if (iter == 0) continue; /* warmup */
-            total_comp_ms += st.comp_ms;
-            total_decomp_ms += st.decomp_ms;
-            total_comp_bytes += (double)st.comp_bytes;
+            if (iter < warmup_iters) continue;
+
+            run_ratio_pct = 100.0 * (double)st.comp_bytes / (double)input_size;
+            run_comp_mbps = (st.comp_ms > 0.0) ? (((double)input_size / 1e6) / (st.comp_ms / 1e3)) : 0.0;
+            run_decomp_mbps = (st.decomp_ms > 0.0) ? (((double)input_size / 1e6) / (st.decomp_ms / 1e3)) : 0.0;
+
+            if ((iter == warmup_iters) || (run_ratio_pct < best_ratio_pct)) {
+                best_ratio_pct = run_ratio_pct;
+            }
+            if (run_comp_mbps > max_comp_mbps) {
+                max_comp_mbps = run_comp_mbps;
+            }
+            if (run_decomp_mbps > max_decomp_mbps) {
+                max_decomp_mbps = run_decomp_mbps;
+            }
         }
 
-        avg_comp_ms = total_comp_ms / (double)(kIters - 1);
-        avg_decomp_ms = total_decomp_ms / (double)(kIters - 1);
-        avg_comp_bytes = total_comp_bytes / (double)(kIters - 1);
-
-        ratio_pct = 100.0 * avg_comp_bytes / (double)input_size;
-        comp_mbps = ((double)input_size / 1e6) / (avg_comp_ms / 1e3);
-        decomp_mbps = ((double)input_size / 1e6) / (avg_decomp_ms / 1e3);
+        ratio_pct = best_ratio_pct;
+        comp_mbps = max_comp_mbps;
+        decomp_mbps = max_decomp_mbps;
 
         format_chunk_label(chunk_bytes, label, sizeof(label));
         printf("%-8s | %-8.2f%% | %-13.1f | %-13.1f\n", label, ratio_pct, comp_mbps, decomp_mbps);
@@ -471,4 +505,3 @@ int main(int argc, char** argv) {
     free(input);
     return 0;
 }
-
